@@ -7,6 +7,8 @@ const VARIANTS = [
   { id: "masterball", label: "Masterball", short: "M" },
 ];
 
+const COLLECTION_TYPES = ["set", "custom", "artist"];
+
 const sampleCollections = [
   {
     id: crypto.randomUUID(),
@@ -45,7 +47,7 @@ const sampleCollections = [
   },
 ];
 
-function makeCard(number, name, supertype, rarity, imageUrl, variants = ["normal"]) {
+function makeCard(number, name, supertype, rarity, imageUrl, variants = ["normal"], artist = "") {
   const owned = {};
   variants.forEach((variant, index) => {
     owned[variant] = index === 0 && Number.parseInt(number, 10) % 3 !== 2;
@@ -56,6 +58,7 @@ function makeCard(number, name, supertype, rarity, imageUrl, variants = ["normal
     name,
     supertype,
     rarity,
+    artist,
     imageUrl,
     variants,
     owned,
@@ -102,7 +105,7 @@ function saveCollections() {
 function normalizeCollections(collections) {
   return (Array.isArray(collections) ? collections : []).map((collection) => ({
     id: collection.id || crypto.randomUUID(),
-    type: collection.type === "custom" ? "custom" : "set",
+    type: COLLECTION_TYPES.includes(collection.type) ? collection.type : "custom",
     name: collection.name || "Untitled collection",
     code: collection.code || "",
     releaseDate: collection.releaseDate || "",
@@ -125,6 +128,7 @@ function normalizeCards(cards) {
       name: card.name || "Unnamed card",
       supertype: card.supertype || card.type || "",
       rarity: card.rarity || "",
+      artist: card.artist || card.illustrator || "",
       imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
       variants,
       owned,
@@ -225,7 +229,7 @@ function renderLoading() {
 function renderHome() {
   const allStats = aggregateStats(state.collections);
   const setStats = aggregateStats(state.collections.filter((item) => item.type === "set"));
-  const customStats = aggregateStats(state.collections.filter((item) => item.type === "custom"));
+  const artistStats = aggregateStats(state.collections.filter((item) => item.type === "artist"));
   return `
     <section class="screen-head">
       <div class="screen-title">
@@ -237,7 +241,7 @@ function renderHome() {
     <section class="overview-grid">
       ${renderMetric("All", allStats, "var(--teal)")}
       ${renderMetric("Sets", setStats, "var(--red)")}
-      ${renderMetric("Custom", customStats, "var(--yellow)")}
+      ${renderMetric("Artists", artistStats, "var(--blue)")}
       <article class="metric">
         <div class="metric__value">${allStats.needed}</div>
         <div class="metric__label">Variants needed</div>
@@ -290,18 +294,19 @@ function renderMetric(label, stats, color) {
 }
 
 function renderCollectionIndex(type) {
-  const collections = state.collections.filter((item) => item.type === type);
+  const collections = state.collections.filter((item) => (type === "custom" ? item.type !== "set" : item.type === type));
   const title = type === "set" ? "Sets" : "Custom Collections";
   return `
     <section class="screen-head">
       <div class="screen-title">
         <h1>${title}</h1>
-        <p>${type === "set" ? "Master official sets and variants." : "Build your own chase lists."}</p>
+        <p>${type === "set" ? "Master official sets and variants." : "Build chase lists, artist runs, and personal goals."}</p>
       </div>
       <button class="primary-button" type="button" data-open-add="${type}">+ Add</button>
     </section>
     <div class="toolbar">
       <button class="secondary-button" data-open-api>Find Pokemon TCG set</button>
+      <button class="secondary-button" data-open-artist-api>Find artist/illus</button>
       <button class="secondary-button" data-open-import>Import JSON</button>
       <button class="secondary-button" data-export>Export</button>
     </div>
@@ -318,6 +323,7 @@ function renderCollectionRow(collection) {
       <img class="thumb" src="${safeAttr(collection.imageUrl)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
       <span>
         <h3>${escapeHtml(collection.name)}</h3>
+        <p class="muted">${escapeHtml(collectionTypeLabel(collection.type))}</p>
         <p class="muted">${stats.owned} / ${stats.total} variants acquired</p>
         <span class="progress-line"><span style="width:${stats.percent}%"></span></span>
       </span>
@@ -349,7 +355,7 @@ function renderCollectionDetail() {
   }
   const stats = collectionStats(collection);
   const filteredCards = collection.cards.filter((card) => {
-    const matchesText = `${card.name} ${card.number} ${card.rarity}`.toLowerCase().includes(state.search.toLowerCase());
+    const matchesText = `${card.name} ${card.number} ${card.rarity} ${card.artist}`.toLowerCase().includes(state.search.toLowerCase());
     const owned = card.variants.some((variant) => card.owned[variant]);
     const needs = card.variants.some((variant) => !card.owned[variant]);
     const matchesFilter = state.activeFilter === "all" || (state.activeFilter === "owned" && owned) || (state.activeFilter === "needed" && needs);
@@ -370,7 +376,7 @@ function renderCollectionDetail() {
             <div>
               <h1>${escapeHtml(collection.name)}</h1>
               <p class="muted">${escapeHtml(collection.goal || "Collection goal")}</p>
-              <p class="muted">${collection.releaseDate ? `Released ${escapeHtml(collection.releaseDate)}` : "Local custom collection"}</p>
+              <p class="muted">${collection.releaseDate ? `Released ${escapeHtml(collection.releaseDate)}` : collectionTypeLabel(collection.type)}</p>
             </div>
           </div>
           <div class="progress-line"><span style="width:${stats.percent}%"></span></div>
@@ -390,7 +396,7 @@ function renderCollectionDetail() {
         </div>
         <div class="field-grid" style="margin-bottom:12px">
           <label>Search cards
-            <input type="search" data-search value="${safeAttr(state.search)}" placeholder="Name, number, rarity" />
+            <input type="search" data-search value="${safeAttr(state.search)}" placeholder="Name, number, rarity, artist" />
           </label>
         </div>
         <div class="grid">
@@ -409,7 +415,7 @@ function renderCardTile(collection, card) {
         <div class="card-meta">
           <div class="card-number">#${escapeHtml(card.number || "-")}</div>
           <h3>${escapeHtml(card.name)}</h3>
-          <p class="muted">${escapeHtml(card.rarity || "Unknown rarity")}</p>
+          <p class="muted">${escapeHtml(card.artist || card.rarity || "Unknown rarity")}</p>
         </div>
       </button>
       <div class="variant-row" aria-label="Variants">
@@ -510,6 +516,10 @@ function bindEvents() {
   document.querySelectorAll("[data-open-api]").forEach((button) => {
     button.addEventListener("click", openApiModal);
   });
+
+  document.querySelectorAll("[data-open-artist-api]").forEach((button) => {
+    button.addEventListener("click", openArtistApiModal);
+  });
 }
 
 function openAddModal(preferredType = "", editId = "") {
@@ -521,6 +531,7 @@ function openAddModal(preferredType = "", editId = "") {
           <select name="type">
             <option value="set" ${(existing?.type || preferredType) === "set" ? "selected" : ""}>Pokemon set</option>
             <option value="custom" ${(existing?.type || preferredType) === "custom" ? "selected" : ""}>Custom collection</option>
+            <option value="artist" ${(existing?.type || preferredType) === "artist" ? "selected" : ""}>Artist / illustrator</option>
           </select>
         </label>
         <label>Name
@@ -536,7 +547,7 @@ function openAddModal(preferredType = "", editId = "") {
           <input name="imageUrl" value="${safeAttr(existing?.imageUrl || "")}" placeholder="https://..." />
         </label>
         <label>Goal
-          <input name="goal" value="${safeAttr(existing?.goal || "")}" placeholder="Master set, reverse holos, favorites..." />
+          <input name="goal" value="${safeAttr(existing?.goal || "")}" placeholder="Master set, illustrator run, favorites..." />
         </label>
       </div>
       <div class="button-row">
@@ -599,6 +610,9 @@ function openCardForm(collectionId, editCardId = "") {
         <label>Rarity
           <input name="rarity" value="${safeAttr(existing?.rarity || "")}" placeholder="Rare Holo" />
         </label>
+        <label>Artist / illustrator
+          <input name="artist" value="${safeAttr(existing?.artist || "")}" placeholder="Mitsuhiro Arita" />
+        </label>
         <label>Card image URL
           <input name="imageUrl" value="${safeAttr(existing?.imageUrl || "")}" placeholder="https://..." />
         </label>
@@ -626,6 +640,7 @@ function openCardForm(collectionId, editCardId = "") {
       number: form.get("number"),
       supertype: form.get("supertype"),
       rarity: form.get("rarity"),
+      artist: form.get("artist"),
       imageUrl: form.get("imageUrl"),
       notes: form.get("notes"),
       variants: variants.length ? variants : ["normal"],
@@ -668,6 +683,7 @@ function openCardDetail(collectionId, cardId) {
           <div><dt>Number</dt><dd>${escapeHtml(card.number || "-")}</dd></div>
           <div><dt>Type</dt><dd>${escapeHtml(card.supertype || "-")}</dd></div>
           <div><dt>Rarity</dt><dd>${escapeHtml(card.rarity || "-")}</dd></div>
+          <div><dt>Artist</dt><dd>${escapeHtml(card.artist || "-")}</dd></div>
           <div><dt>Variants</dt><dd>${card.variants.map((variant) => `${variantLabel(variant)} ${card.owned[variant] ? "owned" : "needed"}`).join(", ")}</dd></div>
           <div><dt>Notes</dt><dd>${escapeHtml(card.notes || "-")}</dd></div>
         </dl>
@@ -702,7 +718,7 @@ function openImportCards(collectionId) {
     <form data-import-cards-form>
       <div class="field-grid">
         <label>Cards JSON
-          <textarea name="json" placeholder='[{"name":"Pikachu","number":"025","imageUrl":"https://...","variants":["normal","reverse"]}]'></textarea>
+          <textarea name="json" placeholder='[{"name":"Pikachu","number":"025","artist":"Mitsuhiro Arita","imageUrl":"https://...","variants":["normal","reverse"]}]'></textarea>
         </label>
       </div>
       <p class="muted">Accepts an array of cards, a Pokemon TCG API card array, or an object with a cards property.</p>
@@ -818,6 +834,61 @@ function openApiModal() {
   });
 }
 
+function openArtistApiModal() {
+  const body = `
+    <form data-artist-api-form>
+      <div class="field-grid">
+        <label>Artist / illustrator name
+          <input name="artist" required placeholder="Mitsuhiro Arita" />
+        </label>
+      </div>
+      <p class="muted">Creates a custom artist collection from PokemonTCG.io cards that match the illustrator field.</p>
+      <div class="button-row">
+        <button class="primary-button" type="submit">Import artist collection</button>
+      </div>
+    </form>
+  `;
+  const modal = showModal("Find artist/illus", "Pokemon TCG API", body);
+  modal.querySelector("[data-artist-api-form]").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const artist = new FormData(event.currentTarget).get("artist").trim();
+    if (!artist) return;
+    toast("Fetching artist cards...");
+    try {
+      const query = `artist:"${artist.replaceAll('"', '\\"')}"`;
+      const response = await fetch(
+        `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(query)}&orderBy=set.releaseDate,number&pageSize=250`,
+      );
+      if (!response.ok) throw new Error("Fetch failed");
+      const cardsJson = await response.json();
+      const cards = normalizeCards((cardsJson.data || []).map(cardFromPossibleApi));
+      if (!cards.length) {
+        toast("No cards found for that artist");
+        return;
+      }
+      const collection = {
+        id: crypto.randomUUID(),
+        type: "artist",
+        name: `${artist} illustrations`,
+        code: slugify(artist),
+        releaseDate: "",
+        imageUrl: cards[0]?.imageUrl || "",
+        goal: `Collect cards illustrated by ${artist}`,
+        cards,
+      };
+      state.collections.unshift(collection);
+      state.activeCollectionId = collection.id;
+      state.route = "detail";
+      saveCollections();
+      closeModal();
+      render();
+      toast(`Imported ${cards.length} cards by ${artist}`);
+    } catch {
+      toast("Could not fetch that artist. Check the spelling or import JSON instead.");
+    }
+  });
+}
+
 function cardFromPossibleApi(card) {
   const hasReverse = ["Common", "Uncommon", "Rare", "Rare Holo"].includes(card.rarity);
   return {
@@ -826,6 +897,7 @@ function cardFromPossibleApi(card) {
     name: card.name || "Unnamed card",
     supertype: card.supertype || card.types?.join(", ") || "",
     rarity: card.rarity || "",
+    artist: card.artist || card.illustrator || "",
     imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
     variants: card.variants || (hasReverse ? ["normal", "reverse"] : ["normal"]),
     owned: card.owned || {},
@@ -869,6 +941,20 @@ function variantLabel(id) {
 
 function variantShort(id) {
   return VARIANTS.find((variant) => variant.id === id)?.short || id.slice(0, 1).toUpperCase();
+}
+
+function collectionTypeLabel(type) {
+  if (type === "set") return "Pokemon set";
+  if (type === "artist") return "Artist / illustrator";
+  return "Custom collection";
+}
+
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 function escapeHtml(value) {

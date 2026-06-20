@@ -19,6 +19,8 @@ const mimeTypes = {
   ".svg": "image/svg+xml",
 };
 
+const COLLECTION_TYPES = ["set", "custom", "artist"];
+
 const seedCollections = [
   {
     id: crypto.randomUUID(),
@@ -55,7 +57,7 @@ const seedCollections = [
   },
 ];
 
-function makeCard(number, name, supertype, rarity, imageUrl, variants) {
+function makeCard(number, name, supertype, rarity, imageUrl, variants, artist = "") {
   const owned = {};
   variants.forEach((variant, index) => {
     owned[variant] = index === 0 && Number.parseInt(number, 10) % 3 !== 2;
@@ -66,6 +68,7 @@ function makeCard(number, name, supertype, rarity, imageUrl, variants) {
     name,
     supertype,
     rarity,
+    artist,
     imageUrl,
     variants,
     owned,
@@ -98,7 +101,7 @@ async function writeCollections(payload) {
 function normalizeCollections(collections) {
   return (Array.isArray(collections) ? collections : []).map((collection) => ({
     id: collection.id || crypto.randomUUID(),
-    type: collection.type === "custom" ? "custom" : "set",
+    type: COLLECTION_TYPES.includes(collection.type) ? collection.type : "custom",
     name: collection.name || "Untitled collection",
     code: collection.code || "",
     releaseDate: collection.releaseDate || "",
@@ -121,6 +124,7 @@ function normalizeCards(cards) {
       name: card.name || "Unnamed card",
       supertype: card.supertype || card.type || "",
       rarity: card.rarity || "",
+      artist: card.artist || card.illustrator || "",
       imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
       variants,
       owned,

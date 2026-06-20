@@ -15,6 +15,7 @@
           "name": "Sprigatito",
           "supertype": "Grass",
           "rarity": "Common",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/1.png",
           "variants": [
             "normal",
@@ -32,6 +33,7 @@
           "name": "Floragato",
           "supertype": "Grass",
           "rarity": "Uncommon",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/2.png",
           "variants": [
             "normal",
@@ -49,6 +51,7 @@
           "name": "Meowscarada",
           "supertype": "Grass",
           "rarity": "Rare",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/3.png",
           "variants": [
             "normal",
@@ -66,6 +69,7 @@
           "name": "Fuecoco",
           "supertype": "Fire",
           "rarity": "Common",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/4.png",
           "variants": [
             "normal",
@@ -83,6 +87,7 @@
           "name": "Crocalor",
           "supertype": "Fire",
           "rarity": "Uncommon",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/5.png",
           "variants": [
             "normal",
@@ -100,6 +105,7 @@
           "name": "Skeledirge",
           "supertype": "Fire",
           "rarity": "Rare",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/6.png",
           "variants": [
             "normal",
@@ -117,6 +123,7 @@
           "name": "Quaxly",
           "supertype": "Water",
           "rarity": "Common",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/7.png",
           "variants": [
             "normal",
@@ -134,6 +141,7 @@
           "name": "Quaxwell",
           "supertype": "Water",
           "rarity": "Uncommon",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv1/8.png",
           "variants": [
             "normal",
@@ -162,6 +170,7 @@
           "name": "Charizard",
           "supertype": "Fire",
           "rarity": "Rare Holo",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/swsh9/18.png",
           "variants": [
             "normal"
@@ -177,6 +186,7 @@
           "name": "Charizard V",
           "supertype": "Fire",
           "rarity": "Ultra Rare",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/swsh9/154.png",
           "variants": [
             "normal"
@@ -192,6 +202,7 @@
           "name": "Charizard ex",
           "supertype": "Fire",
           "rarity": "Special Illustration Rare",
+          "artist": "",
           "imageUrl": "https://images.pokemontcg.io/sv3pt5/199.png",
           "variants": [
             "normal"

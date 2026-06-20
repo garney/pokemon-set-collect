@@ -132,9 +132,16 @@ function normalizeCards(cards) {
       imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
       variants,
       owned,
+      market: normalizeMarket(card.market),
       notes: card.notes || "",
     };
   });
+}
+
+function normalizeMarket(market = {}) {
+  return {
+    ebayAu: market.ebayAu || null,
+  };
 }
 
 function collectionStats(collection) {
@@ -416,6 +423,7 @@ function renderCardTile(collection, card) {
           <div class="card-number">#${escapeHtml(card.number || "-")}</div>
           <h3>${escapeHtml(card.name)}</h3>
           <p class="muted">${escapeHtml(card.artist || card.rarity || "Unknown rarity")}</p>
+          ${card.market?.ebayAu?.lastPrice ? `<p class="price-badge">${formatAud(card.market.ebayAu.lastPrice)} last sold</p>` : ""}
         </div>
       </button>
       <div class="variant-row" aria-label="Variants">
@@ -616,6 +624,12 @@ function openCardForm(collectionId, editCardId = "") {
         <label>Card image URL
           <input name="imageUrl" value="${safeAttr(existing?.imageUrl || "")}" placeholder="https://..." />
         </label>
+        <label>Manual eBay AU last sold price
+          <input name="lastSoldPrice" inputmode="decimal" value="${safeAttr(existing?.market?.ebayAu?.lastPrice || "")}" placeholder="42.50" />
+        </label>
+        <label>Last sold source URL
+          <input name="lastSoldUrl" value="${safeAttr(existing?.market?.ebayAu?.sourceUrl || "")}" placeholder="https://www.ebay.com.au/..." />
+        </label>
         <label>Notes
           <textarea name="notes">${escapeHtml(existing?.notes || "")}</textarea>
         </label>
@@ -644,6 +658,20 @@ function openCardForm(collectionId, editCardId = "") {
       imageUrl: form.get("imageUrl"),
       notes: form.get("notes"),
       variants: variants.length ? variants : ["normal"],
+    };
+    const lastSoldPrice = parseOptionalMoney(form.get("lastSoldPrice"));
+    cardData.market = {
+      ebayAu: lastSoldPrice
+        ? {
+            query: ebaySearchQuery(collection, cardData),
+            sourceUrl: form.get("lastSoldUrl"),
+            fetchedAt: new Date().toISOString(),
+            currency: "AUD",
+            lastPrice: lastSoldPrice,
+            averagePrice: null,
+            sales: [],
+          }
+        : existing?.market || { ebayAu: null },
     };
     if (existing) {
       Object.assign(existing, cardData);
@@ -674,6 +702,7 @@ function openCardDetail(collectionId, cardId) {
   const collection = state.collections.find((item) => item.id === collectionId);
   const card = findCard(collectionId, cardId);
   if (!collection || !card) return;
+  const ebayUrl = card.market?.ebayAu?.sourceUrl || ebaySoldSearchUrl(ebaySearchQuery(collection, card));
   const body = `
     <div class="modal-body-pad">
       <div class="card-detail">
@@ -684,11 +713,16 @@ function openCardDetail(collectionId, cardId) {
           <div><dt>Type</dt><dd>${escapeHtml(card.supertype || "-")}</dd></div>
           <div><dt>Rarity</dt><dd>${escapeHtml(card.rarity || "-")}</dd></div>
           <div><dt>Artist</dt><dd>${escapeHtml(card.artist || "-")}</dd></div>
+          <div><dt>eBay AU last sold</dt><dd>${card.market?.ebayAu?.lastPrice ? formatAud(card.market.ebayAu.lastPrice) : "-"}</dd></div>
+          <div><dt>eBay AU average</dt><dd>${card.market?.ebayAu?.averagePrice ? formatAud(card.market.ebayAu.averagePrice) : "-"}</dd></div>
           <div><dt>Variants</dt><dd>${card.variants.map((variant) => `${variantLabel(variant)} ${card.owned[variant] ? "owned" : "needed"}`).join(", ")}</dd></div>
           <div><dt>Notes</dt><dd>${escapeHtml(card.notes || "-")}</dd></div>
         </dl>
+        ${renderEbaySales(card)}
         <div class="button-row">
           ${card.variants.map((variant) => `<button class="variant-pill ${card.owned[variant] ? "is-owned" : ""}" data-toggle-variant="${collection.id}:${card.id}:${variant}">${variantLabel(variant)}</button>`).join("")}
+          <button class="secondary-button" data-refresh-ebay="${collection.id}:${card.id}">Refresh eBay AU</button>
+          <a class="secondary-button button-link" href="${safeAttr(ebayUrl)}" target="_blank" rel="noreferrer">Open eBay sold</a>
           <button class="secondary-button" data-edit-card="${collection.id}:${card.id}">Edit</button>
         </div>
       </div>
@@ -709,6 +743,89 @@ function openCardDetail(collectionId, cardId) {
     closeModal();
     openCardForm(collectionId, cardId);
   });
+  modal.querySelector("[data-refresh-ebay]")?.addEventListener("click", async () => {
+    await refreshEbayPrice(collectionId, cardId);
+  });
+}
+
+function renderEbaySales(card) {
+  const ebay = card.market?.ebayAu;
+  if (!ebay?.sales?.length) {
+    return `
+      <section class="sales-panel">
+        <h3>eBay AU sold prices</h3>
+        <p class="muted">No sold-price snapshot yet. Use Refresh eBay AU to fetch recent completed listings.</p>
+      </section>
+    `;
+  }
+  return `
+    <section class="sales-panel">
+      <h3>eBay AU sold prices</h3>
+      <p class="muted">Fetched ${formatDateTime(ebay.fetchedAt)} from sold/completed listings.</p>
+      <div class="sales-list">
+        ${ebay.sales
+          .map(
+            (sale) => `
+              <a class="sale-row" href="${safeAttr(sale.url || ebay.sourceUrl)}" target="_blank" rel="noreferrer">
+                <span>
+                  <strong>${escapeHtml(sale.title || "Sold listing")}</strong>
+                  <small>${escapeHtml(sale.soldDate || "Recent sold listing")}</small>
+                </span>
+                <b>${formatAud(sale.price)}</b>
+              </a>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+async function refreshEbayPrice(collectionId, cardId) {
+  const collection = state.collections.find((item) => item.id === collectionId);
+  const card = findCard(collectionId, cardId);
+  if (!collection || !card) return;
+  const query = ebaySearchQuery(collection, card);
+  toast("Fetching eBay AU sold prices...");
+  try {
+    const response = await fetch(`/api/ebay/sold-prices?query=${encodeURIComponent(query)}`);
+    const ebayAu = await response.json();
+    if (!response.ok) {
+      throw new Error(ebayAu.sourceUrl || "Could not fetch eBay prices");
+    }
+    card.market = {
+      ...(card.market || {}),
+      ebayAu,
+    };
+    saveCollections();
+    closeModal();
+    render();
+    openCardDetail(collectionId, cardId);
+    toast(ebayAu.lastPrice ? `Last sold ${formatAud(ebayAu.lastPrice)}` : "No sold prices found");
+  } catch {
+    toast("Could not fetch eBay AU prices. You can add a manual price in Edit.");
+  }
+}
+
+function ebaySearchQuery(collection, card) {
+  const pieces = [
+    "pokemon card",
+    card.name,
+    card.number,
+    collection.type === "set" ? collection.name : "",
+    card.rarity?.includes("Reverse") ? "reverse" : "",
+  ];
+  return pieces.filter(Boolean).join(" ");
+}
+
+function ebaySoldSearchUrl(query) {
+  const params = new URLSearchParams({
+    _nkw: query,
+    LH_Sold: "1",
+    LH_Complete: "1",
+    _sop: "13",
+  });
+  return `https://www.ebay.com.au/sch/i.html?${params.toString()}`;
 }
 
 function openImportCards(collectionId) {
@@ -1039,6 +1156,26 @@ function slugify(value) {
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+function parseOptionalMoney(value) {
+  const parsed = Number.parseFloat(String(value || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : null;
+}
+
+function formatAud(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `AU $${parsed.toFixed(2)}` : "-";
+}
+
+function formatDateTime(value) {
+  if (!value) return "recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "recently";
+  return date.toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function escapeHtml(value) {

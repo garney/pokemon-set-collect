@@ -1,0 +1,207 @@
+{
+  "collections": [
+    {
+      "id": "8ab4f051-9a26-44f4-aa9e-e5239be3c9df",
+      "type": "set",
+      "name": "Scarlet & Violet Base Set",
+      "code": "sv1",
+      "releaseDate": "2023-03-31",
+      "imageUrl": "https://images.pokemontcg.io/sv1/logo.png",
+      "goal": "Master set",
+      "cards": [
+        {
+          "id": "b8819d63-3c8e-4c68-9344-8fb19df23f97",
+          "number": "001",
+          "name": "Sprigatito",
+          "supertype": "Grass",
+          "rarity": "Common",
+          "imageUrl": "https://images.pokemontcg.io/sv1/1.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": true,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "93626b1c-2b2d-4fb5-8478-ae2f82589236",
+          "number": "002",
+          "name": "Floragato",
+          "supertype": "Grass",
+          "rarity": "Uncommon",
+          "imageUrl": "https://images.pokemontcg.io/sv1/2.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": false,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "b5c62e62-db1a-4e3d-bbe9-db919a426893",
+          "number": "003",
+          "name": "Meowscarada",
+          "supertype": "Grass",
+          "rarity": "Rare",
+          "imageUrl": "https://images.pokemontcg.io/sv1/3.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": true,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "a7c3343e-d33c-4608-9f5b-3d62e3625643",
+          "number": "004",
+          "name": "Fuecoco",
+          "supertype": "Fire",
+          "rarity": "Common",
+          "imageUrl": "https://images.pokemontcg.io/sv1/4.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": true,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "fe2fd66a-cc42-4a5a-82c6-65165c60bc1f",
+          "number": "005",
+          "name": "Crocalor",
+          "supertype": "Fire",
+          "rarity": "Uncommon",
+          "imageUrl": "https://images.pokemontcg.io/sv1/5.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": false,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "66952d3d-4c71-4dc5-8eb4-7ef6eef07d28",
+          "number": "006",
+          "name": "Skeledirge",
+          "supertype": "Fire",
+          "rarity": "Rare",
+          "imageUrl": "https://images.pokemontcg.io/sv1/6.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": true,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "f304dbcb-59d5-4cac-bd52-f212119c96f7",
+          "number": "007",
+          "name": "Quaxly",
+          "supertype": "Water",
+          "rarity": "Common",
+          "imageUrl": "https://images.pokemontcg.io/sv1/7.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": true,
+            "reverse": false
+          },
+          "notes": ""
+        },
+        {
+          "id": "26b7002a-ff17-49c4-a79b-c6a9bbbacab0",
+          "number": "008",
+          "name": "Quaxwell",
+          "supertype": "Water",
+          "rarity": "Uncommon",
+          "imageUrl": "https://images.pokemontcg.io/sv1/8.png",
+          "variants": [
+            "normal",
+            "reverse"
+          ],
+          "owned": {
+            "normal": false,
+            "reverse": false
+          },
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "9e0fcbd9-8210-4e81-a1f1-6fa0b01b189d",
+      "type": "custom",
+      "name": "Favorite Charizard Cards",
+      "code": "custom-charizard",
+      "releaseDate": "",
+      "imageUrl": "https://images.pokemontcg.io/swsh9/18.png",
+      "goal": "Personal chase list",
+      "cards": [
+        {
+          "id": "38aa9770-e979-4172-a4b5-28624f114be2",
+          "number": "018",
+          "name": "Charizard",
+          "supertype": "Fire",
+          "rarity": "Rare Holo",
+          "imageUrl": "https://images.pokemontcg.io/swsh9/18.png",
+          "variants": [
+            "normal"
+          ],
+          "owned": {
+            "normal": true
+          },
+          "notes": ""
+        },
+        {
+          "id": "152cce03-67d0-411c-8afe-53b9a843014f",
+          "number": "154",
+          "name": "Charizard V",
+          "supertype": "Fire",
+          "rarity": "Ultra Rare",
+          "imageUrl": "https://images.pokemontcg.io/swsh9/154.png",
+          "variants": [
+            "normal"
+          ],
+          "owned": {
+            "normal": true
+          },
+          "notes": ""
+        },
+        {
+          "id": "f14a8fd6-426e-4c47-881b-6a576840265b",
+          "number": "199",
+          "name": "Charizard ex",
+          "supertype": "Fire",
+          "rarity": "Special Illustration Rare",
+          "imageUrl": "https://images.pokemontcg.io/sv3pt5/199.png",
+          "variants": [
+            "normal"
+          ],
+          "owned": {
+            "normal": true
+          },
+          "notes": ""
+        }
+      ]
+    }
+  ]
+}

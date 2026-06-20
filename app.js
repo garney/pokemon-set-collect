@@ -1,0 +1,901 @@
+const STORAGE_KEY = "setdex.collections.v1";
+
+const VARIANTS = [
+  { id: "normal", label: "Normal", short: "N" },
+  { id: "reverse", label: "Reverse", short: "R" },
+  { id: "pokeball", label: "Pokeball", short: "P" },
+  { id: "masterball", label: "Masterball", short: "M" },
+];
+
+const sampleCollections = [
+  {
+    id: crypto.randomUUID(),
+    type: "set",
+    name: "Scarlet & Violet Base Set",
+    code: "sv1",
+    releaseDate: "2023-03-31",
+    imageUrl:
+      "https://images.pokemontcg.io/sv1/logo.png",
+    goal: "Master set",
+    cards: [
+      makeCard("001", "Sprigatito", "Grass", "Common", "https://images.pokemontcg.io/sv1/1.png", ["normal", "reverse"]),
+      makeCard("002", "Floragato", "Grass", "Uncommon", "https://images.pokemontcg.io/sv1/2.png", ["normal", "reverse"]),
+      makeCard("003", "Meowscarada", "Grass", "Rare", "https://images.pokemontcg.io/sv1/3.png", ["normal", "reverse"]),
+      makeCard("004", "Fuecoco", "Fire", "Common", "https://images.pokemontcg.io/sv1/4.png", ["normal", "reverse"]),
+      makeCard("005", "Crocalor", "Fire", "Uncommon", "https://images.pokemontcg.io/sv1/5.png", ["normal", "reverse"]),
+      makeCard("006", "Skeledirge", "Fire", "Rare", "https://images.pokemontcg.io/sv1/6.png", ["normal", "reverse"]),
+      makeCard("007", "Quaxly", "Water", "Common", "https://images.pokemontcg.io/sv1/7.png", ["normal", "reverse"]),
+      makeCard("008", "Quaxwell", "Water", "Uncommon", "https://images.pokemontcg.io/sv1/8.png", ["normal", "reverse"]),
+    ],
+  },
+  {
+    id: crypto.randomUUID(),
+    type: "custom",
+    name: "Favorite Charizard Cards",
+    code: "custom-charizard",
+    releaseDate: "",
+    imageUrl:
+      "https://images.pokemontcg.io/swsh9/18.png",
+    goal: "Personal chase list",
+    cards: [
+      makeCard("018", "Charizard", "Fire", "Rare Holo", "https://images.pokemontcg.io/swsh9/18.png", ["normal"]),
+      makeCard("020", "Charizard V", "Fire", "Ultra Rare", "https://images.pokemontcg.io/swsh9/154.png", ["normal"]),
+      makeCard("174", "Charizard ex", "Fire", "Special Illustration Rare", "https://images.pokemontcg.io/sv3pt5/199.png", ["normal"]),
+    ],
+  },
+];
+
+function makeCard(number, name, supertype, rarity, imageUrl, variants = ["normal"]) {
+  const owned = {};
+  variants.forEach((variant, index) => {
+    owned[variant] = index === 0 && Number.parseInt(number, 10) % 3 !== 2;
+  });
+  return {
+    id: crypto.randomUUID(),
+    number,
+    name,
+    supertype,
+    rarity,
+    imageUrl,
+    variants,
+    owned,
+    notes: "",
+  };
+}
+
+const state = {
+  route: "home",
+  activeCollectionId: null,
+  activeFilter: "all",
+  activeVariant: "all",
+  search: "",
+  collections: [],
+  isLoading: true,
+};
+
+async function loadCollections() {
+  try {
+    const response = await fetch("/api/collections");
+    if (!response.ok) throw new Error("Could not load collections");
+    const payload = await response.json();
+    state.collections = normalizeCollections(payload.collections || payload);
+  } catch {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    state.collections = raw ? normalizeCollections(JSON.parse(raw)) : sampleCollections;
+  } finally {
+    state.isLoading = false;
+    render();
+  }
+}
+
+function saveCollections() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.collections, null, 2));
+  fetch("/api/collections", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ collections: state.collections }),
+  }).catch(() => {
+    toast("Saved in browser only. Node server was not reachable.");
+  });
+}
+
+function normalizeCollections(collections) {
+  return (Array.isArray(collections) ? collections : []).map((collection) => ({
+    id: collection.id || crypto.randomUUID(),
+    type: collection.type === "custom" ? "custom" : "set",
+    name: collection.name || "Untitled collection",
+    code: collection.code || "",
+    releaseDate: collection.releaseDate || "",
+    imageUrl: collection.imageUrl || "",
+    goal: collection.goal || "",
+    cards: normalizeCards(collection.cards || []),
+  }));
+}
+
+function normalizeCards(cards) {
+  return cards.map((card) => {
+    const variants = Array.isArray(card.variants) && card.variants.length ? card.variants : ["normal"];
+    const owned = {};
+    variants.forEach((variant) => {
+      owned[variant] = Boolean(card.owned?.[variant]);
+    });
+    return {
+      id: card.id || crypto.randomUUID(),
+      number: String(card.number || ""),
+      name: card.name || "Unnamed card",
+      supertype: card.supertype || card.type || "",
+      rarity: card.rarity || "",
+      imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
+      variants,
+      owned,
+      notes: card.notes || "",
+    };
+  });
+}
+
+function collectionStats(collection) {
+  const total = collection.cards.reduce((sum, card) => sum + card.variants.length, 0);
+  const owned = collection.cards.reduce(
+    (sum, card) => sum + card.variants.filter((variant) => card.owned[variant]).length,
+    0,
+  );
+  return {
+    total,
+    owned,
+    needed: Math.max(total - owned, 0),
+    percent: total ? Math.round((owned / total) * 100) : 0,
+  };
+}
+
+function render() {
+  const app = document.querySelector("#app");
+  app.innerHTML = `
+    ${renderTopbar()}
+    ${renderTabs()}
+    <main class="content">${renderRoute()}</main>
+    ${renderBottomNav()}
+  `;
+  bindEvents();
+}
+
+function renderTopbar() {
+  return `
+    <header class="topbar">
+      <button class="brand plain-reset" data-route="home" aria-label="Go home">
+        <span class="brand-mark">S</span>
+        <span>
+          <h1>SetDex</h1>
+          <p>Local Pokemon collection tracker</p>
+        </span>
+      </button>
+      <div class="top-actions">
+        <button class="icon-button" type="button" data-open-import title="Import JSON">In</button>
+        <button class="icon-button" type="button" data-export title="Export JSON">Out</button>
+      </div>
+    </header>
+  `;
+}
+
+function renderTabs() {
+  const tabs = [
+    ["home", "Home"],
+    ["sets", "Sets"],
+    ["custom", "Custom"],
+  ];
+  return `
+    <nav class="tabs" aria-label="Primary">
+      ${tabs.map(([id, label]) => `<button class="tab ${state.route === id ? "is-active" : ""}" data-route="${id}">${label}</button>`).join("")}
+    </nav>
+  `;
+}
+
+function renderBottomNav() {
+  const items = [
+    ["home", "Home", "H"],
+    ["sets", "Sets", "S"],
+    ["add", "Add", "+"],
+    ["custom", "Custom", "C"],
+  ];
+  return `
+    <nav class="bottom-nav" aria-label="Mobile">
+      ${items
+        .map(([id, label, icon]) => `<button class="nav-item ${state.route === id ? "is-active" : ""}" data-${id === "add" ? "open-add" : "route"}="${id}"><span>${icon}</span><span>${label}</span></button>`)
+        .join("")}
+    </nav>
+  `;
+}
+
+function renderRoute() {
+  if (state.isLoading) return renderLoading();
+  if (state.route === "detail") return renderCollectionDetail();
+  if (state.route === "sets") return renderCollectionIndex("set");
+  if (state.route === "custom") return renderCollectionIndex("custom");
+  return renderHome();
+}
+
+function renderLoading() {
+  return `
+    <section class="empty-state">
+      <h3>Loading collection file</h3>
+      <p class="muted">Reading data/collections.json from the local Node server.</p>
+    </section>
+  `;
+}
+
+function renderHome() {
+  const allStats = aggregateStats(state.collections);
+  const setStats = aggregateStats(state.collections.filter((item) => item.type === "set"));
+  const customStats = aggregateStats(state.collections.filter((item) => item.type === "custom"));
+  return `
+    <section class="screen-head">
+      <div class="screen-title">
+        <h1>Collection Overview</h1>
+        <p>${state.collections.length} collections tracked on this device</p>
+      </div>
+      <button class="primary-button" type="button" data-open-add>+ Add</button>
+    </section>
+    <section class="overview-grid">
+      ${renderMetric("All", allStats, "var(--teal)")}
+      ${renderMetric("Sets", setStats, "var(--red)")}
+      ${renderMetric("Custom", customStats, "var(--yellow)")}
+      <article class="metric">
+        <div class="metric__value">${allStats.needed}</div>
+        <div class="metric__label">Variants needed</div>
+      </article>
+    </section>
+    <section class="section">
+      <div class="section-header">
+        <h2>Recent Collections</h2>
+        <button class="plain-button" data-route="sets">View sets</button>
+      </div>
+      <div class="collection-list">
+        ${state.collections.slice(0, 6).map(renderCollectionRow).join("") || renderEmpty("No collections yet", "Create a set or custom list to start tracking.")}
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-header">
+        <h2>Card Collection Preview</h2>
+        <button class="plain-button" data-route="custom">Custom</button>
+      </div>
+      <div class="collection-list">
+        ${state.collections.flatMap((collection) => collection.cards.map((card) => ({ collection, card }))).slice(0, 5).map(renderPreviewCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function aggregateStats(collections) {
+  return collections.reduce(
+    (acc, collection) => {
+      const stats = collectionStats(collection);
+      acc.total += stats.total;
+      acc.owned += stats.owned;
+      acc.needed += stats.needed;
+      acc.percent = acc.total ? Math.round((acc.owned / acc.total) * 100) : 0;
+      return acc;
+    },
+    { total: 0, owned: 0, needed: 0, percent: 0 },
+  );
+}
+
+function renderMetric(label, stats, color) {
+  return `
+    <article class="metric">
+      <div class="progress-ring" style="--p:${stats.percent};--c:${color}"><span>${stats.percent}%</span></div>
+      <div class="metric__label">${label}</div>
+      <div class="metric__value">${stats.owned}</div>
+      <div class="metric__label">${stats.total} total</div>
+    </article>
+  `;
+}
+
+function renderCollectionIndex(type) {
+  const collections = state.collections.filter((item) => item.type === type);
+  const title = type === "set" ? "Sets" : "Custom Collections";
+  return `
+    <section class="screen-head">
+      <div class="screen-title">
+        <h1>${title}</h1>
+        <p>${type === "set" ? "Master official sets and variants." : "Build your own chase lists."}</p>
+      </div>
+      <button class="primary-button" type="button" data-open-add="${type}">+ Add</button>
+    </section>
+    <div class="toolbar">
+      <button class="secondary-button" data-open-api>Find Pokemon TCG set</button>
+      <button class="secondary-button" data-open-import>Import JSON</button>
+      <button class="secondary-button" data-export>Export</button>
+    </div>
+    <section class="section collection-list">
+      ${collections.map(renderCollectionRow).join("") || renderEmpty(`No ${title.toLowerCase()} yet`, "Use Add to create one locally.")}
+    </section>
+  `;
+}
+
+function renderCollectionRow(collection) {
+  const stats = collectionStats(collection);
+  return `
+    <button class="collection-row" data-open-collection="${collection.id}">
+      <img class="thumb" src="${safeAttr(collection.imageUrl)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <span>
+        <h3>${escapeHtml(collection.name)}</h3>
+        <p class="muted">${stats.owned} / ${stats.total} variants acquired</p>
+        <span class="progress-line"><span style="width:${stats.percent}%"></span></span>
+      </span>
+      <span class="chevron">${stats.percent}%</span>
+    </button>
+  `;
+}
+
+function renderPreviewCard({ collection, card }) {
+  const ownedCount = card.variants.filter((variant) => card.owned[variant]).length;
+  return `
+    <button class="collection-row" data-open-card="${collection.id}:${card.id}">
+      <img class="thumb" src="${safeAttr(card.imageUrl)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <span>
+        <h3>${escapeHtml(card.name)}</h3>
+        <p class="muted">${escapeHtml(collection.name)}</p>
+        <p class="muted">${escapeHtml(card.number)} / ${escapeHtml(card.rarity || "Unknown rarity")}</p>
+      </span>
+      <span class="chevron">${ownedCount}/${card.variants.length}</span>
+    </button>
+  `;
+}
+
+function renderCollectionDetail() {
+  const collection = getActiveCollection();
+  if (!collection) {
+    state.route = "home";
+    return renderHome();
+  }
+  const stats = collectionStats(collection);
+  const filteredCards = collection.cards.filter((card) => {
+    const matchesText = `${card.name} ${card.number} ${card.rarity}`.toLowerCase().includes(state.search.toLowerCase());
+    const owned = card.variants.some((variant) => card.owned[variant]);
+    const needs = card.variants.some((variant) => !card.owned[variant]);
+    const matchesFilter = state.activeFilter === "all" || (state.activeFilter === "owned" && owned) || (state.activeFilter === "needed" && needs);
+    const matchesVariant = state.activeVariant === "all" || card.variants.includes(state.activeVariant);
+    return matchesText && matchesFilter && matchesVariant;
+  });
+
+  return `
+    <section class="layout-two">
+      <aside>
+        <div class="screen-head">
+          <button class="icon-button" data-route="${collection.type === "set" ? "sets" : "custom"}" aria-label="Back">Back</button>
+          <button class="plain-button" data-edit-collection="${collection.id}">Edit</button>
+        </div>
+        <div class="detail-panel">
+          <div class="set-hero">
+            <img class="thumb" src="${safeAttr(collection.imageUrl)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+            <div>
+              <h1>${escapeHtml(collection.name)}</h1>
+              <p class="muted">${escapeHtml(collection.goal || "Collection goal")}</p>
+              <p class="muted">${collection.releaseDate ? `Released ${escapeHtml(collection.releaseDate)}` : "Local custom collection"}</p>
+            </div>
+          </div>
+          <div class="progress-line"><span style="width:${stats.percent}%"></span></div>
+          <p class="muted">${stats.percent}% complete - ${stats.owned} / ${stats.total} variants acquired</p>
+          <div class="button-row">
+            <button class="secondary-button" data-open-card-form="${collection.id}">Add card</button>
+            <button class="secondary-button" data-open-import-cards="${collection.id}">Import cards</button>
+          </div>
+        </div>
+      </aside>
+      <section>
+        <div class="filters">
+          ${["all", "owned", "needed"].map((filter) => `<button class="chip ${state.activeFilter === filter ? "is-active" : ""}" data-filter="${filter}">${titleCase(filter)}</button>`).join("")}
+        </div>
+        <div class="filters">
+          ${["all", ...VARIANTS.map((item) => item.id)].map((variant) => `<button class="chip ${state.activeVariant === variant ? "is-active" : ""}" data-variant="${variant}">${variant === "all" ? "All variants" : variantLabel(variant)}</button>`).join("")}
+        </div>
+        <div class="field-grid" style="margin-bottom:12px">
+          <label>Search cards
+            <input type="search" data-search value="${safeAttr(state.search)}" placeholder="Name, number, rarity" />
+          </label>
+        </div>
+        <div class="grid">
+          ${filteredCards.map((card) => renderCardTile(collection, card)).join("") || renderEmpty("No cards match", "Try another filter or add cards to this collection.")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderCardTile(collection, card) {
+  return `
+    <article class="card-item">
+      <button class="plain-reset" data-open-card="${collection.id}:${card.id}" style="width:100%;text-align:left">
+        <img class="card-art" src="${safeAttr(card.imageUrl)}" alt="${safeAttr(card.name)}" loading="lazy" onerror="this.style.visibility='hidden'">
+        <div class="card-meta">
+          <div class="card-number">#${escapeHtml(card.number || "-")}</div>
+          <h3>${escapeHtml(card.name)}</h3>
+          <p class="muted">${escapeHtml(card.rarity || "Unknown rarity")}</p>
+        </div>
+      </button>
+      <div class="variant-row" aria-label="Variants">
+        ${card.variants.map((variant) => `<button class="variant-pill ${card.owned[variant] ? "is-owned" : ""}" data-toggle-variant="${collection.id}:${card.id}:${variant}" title="${variantLabel(variant)}">${variantShort(variant)}</button>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderEmpty(title, body) {
+  return `<div class="empty-state"><h3>${escapeHtml(title)}</h3><p class="muted">${escapeHtml(body)}</p></div>`;
+}
+
+function bindEvents() {
+  document.querySelectorAll("[data-route]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const route = button.dataset.route;
+      if (route === "add") return openAddModal();
+      state.route = route;
+      state.search = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-open-add]").forEach((button) => {
+    button.addEventListener("click", () => openAddModal(button.dataset.openAdd || ""));
+  });
+
+  document.querySelectorAll("[data-open-collection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeCollectionId = button.dataset.openCollection;
+      state.route = "detail";
+      state.activeFilter = "all";
+      state.activeVariant = "all";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeFilter = button.dataset.filter;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-variant]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeVariant = button.dataset.variant;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-search]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.search = input.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-variant]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [collectionId, cardId, variant] = button.dataset.toggleVariant.split(":");
+      const card = findCard(collectionId, cardId);
+      if (!card) return;
+      card.owned[variant] = !card.owned[variant];
+      saveCollections();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-open-card]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [collectionId, cardId] = button.dataset.openCard.split(":");
+      openCardDetail(collectionId, cardId);
+    });
+  });
+
+  document.querySelectorAll("[data-open-card-form]").forEach((button) => {
+    button.addEventListener("click", () => openCardForm(button.dataset.openCardForm));
+  });
+
+  document.querySelectorAll("[data-open-import-cards]").forEach((button) => {
+    button.addEventListener("click", () => openImportCards(button.dataset.openImportCards));
+  });
+
+  document.querySelectorAll("[data-edit-collection]").forEach((button) => {
+    button.addEventListener("click", () => openAddModal("", button.dataset.editCollection));
+  });
+
+  document.querySelectorAll("[data-open-import]").forEach((button) => {
+    button.addEventListener("click", openImportCollections);
+  });
+
+  document.querySelectorAll("[data-export]").forEach((button) => {
+    button.addEventListener("click", exportCollections);
+  });
+
+  document.querySelectorAll("[data-open-api]").forEach((button) => {
+    button.addEventListener("click", openApiModal);
+  });
+}
+
+function openAddModal(preferredType = "", editId = "") {
+  const existing = state.collections.find((item) => item.id === editId);
+  const body = `
+    <form data-collection-form>
+      <div class="field-grid">
+        <label>Type
+          <select name="type">
+            <option value="set" ${(existing?.type || preferredType) === "set" ? "selected" : ""}>Pokemon set</option>
+            <option value="custom" ${(existing?.type || preferredType) === "custom" ? "selected" : ""}>Custom collection</option>
+          </select>
+        </label>
+        <label>Name
+          <input name="name" required value="${safeAttr(existing?.name || "")}" placeholder="Scarlet & Violet master set" />
+        </label>
+        <label>Code
+          <input name="code" value="${safeAttr(existing?.code || "")}" placeholder="sv1 or my-chase-list" />
+        </label>
+        <label>Release date
+          <input name="releaseDate" type="date" value="${safeAttr(existing?.releaseDate || "")}" />
+        </label>
+        <label>Cover image URL
+          <input name="imageUrl" value="${safeAttr(existing?.imageUrl || "")}" placeholder="https://..." />
+        </label>
+        <label>Goal
+          <input name="goal" value="${safeAttr(existing?.goal || "")}" placeholder="Master set, reverse holos, favorites..." />
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="primary-button" type="submit">${existing ? "Save collection" : "Create collection"}</button>
+        ${existing ? `<button class="danger-button" type="button" data-delete-collection="${existing.id}">Delete</button>` : ""}
+      </div>
+    </form>
+  `;
+  const modal = showModal(existing ? "Edit collection" : "Add collection", "Tracker", body);
+  modal.querySelector("[data-collection-form]").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    if (existing) {
+      Object.assign(existing, Object.fromEntries(form.entries()));
+    } else {
+      const collection = {
+        id: crypto.randomUUID(),
+        type: form.get("type"),
+        name: form.get("name"),
+        code: form.get("code"),
+        releaseDate: form.get("releaseDate"),
+        imageUrl: form.get("imageUrl"),
+        goal: form.get("goal"),
+        cards: [],
+      };
+      state.collections.unshift(collection);
+      state.activeCollectionId = collection.id;
+      state.route = "detail";
+    }
+    saveCollections();
+    closeModal();
+    render();
+  });
+  modal.querySelector("[data-delete-collection]")?.addEventListener("click", (event) => {
+    state.collections = state.collections.filter((item) => item.id !== event.currentTarget.dataset.deleteCollection);
+    state.route = "home";
+    saveCollections();
+    closeModal();
+    render();
+  });
+}
+
+function openCardForm(collectionId, editCardId = "") {
+  const collection = state.collections.find((item) => item.id === collectionId);
+  const existing = collection?.cards.find((card) => card.id === editCardId);
+  if (!collection) return;
+  const checkedVariants = new Set(existing?.variants || ["normal"]);
+  const body = `
+    <form data-card-form>
+      <div class="field-grid">
+        <label>Name
+          <input name="name" required value="${safeAttr(existing?.name || "")}" placeholder="Pikachu" />
+        </label>
+        <label>Number
+          <input name="number" value="${safeAttr(existing?.number || "")}" placeholder="025" />
+        </label>
+        <label>Type
+          <input name="supertype" value="${safeAttr(existing?.supertype || "")}" placeholder="Lightning" />
+        </label>
+        <label>Rarity
+          <input name="rarity" value="${safeAttr(existing?.rarity || "")}" placeholder="Rare Holo" />
+        </label>
+        <label>Card image URL
+          <input name="imageUrl" value="${safeAttr(existing?.imageUrl || "")}" placeholder="https://..." />
+        </label>
+        <label>Notes
+          <textarea name="notes">${escapeHtml(existing?.notes || "")}</textarea>
+        </label>
+      </div>
+      <h3>Variants to collect</h3>
+      <div class="filters">
+        ${VARIANTS.map((variant) => `<label class="chip"><input type="checkbox" name="variants" value="${variant.id}" ${checkedVariants.has(variant.id) ? "checked" : ""}> ${variant.label}</label>`).join("")}
+      </div>
+      <div class="button-row">
+        <button class="primary-button" type="submit">${existing ? "Save card" : "Add card"}</button>
+        ${existing ? `<button class="danger-button" type="button" data-delete-card="${existing.id}">Delete</button>` : ""}
+      </div>
+    </form>
+  `;
+  const modal = showModal(existing ? "Edit card" : "Add card", collection.name, body);
+  modal.querySelector("[data-card-form]").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const variants = form.getAll("variants");
+    const cardData = {
+      name: form.get("name"),
+      number: form.get("number"),
+      supertype: form.get("supertype"),
+      rarity: form.get("rarity"),
+      imageUrl: form.get("imageUrl"),
+      notes: form.get("notes"),
+      variants: variants.length ? variants : ["normal"],
+    };
+    if (existing) {
+      Object.assign(existing, cardData);
+      existing.owned = existing.owned || {};
+      existing.variants.forEach((variant) => {
+        existing.owned[variant] = Boolean(existing.owned[variant]);
+      });
+    } else {
+      const owned = {};
+      cardData.variants.forEach((variant) => {
+        owned[variant] = false;
+      });
+      collection.cards.push({ id: crypto.randomUUID(), ...cardData, owned });
+    }
+    saveCollections();
+    closeModal();
+    render();
+  });
+  modal.querySelector("[data-delete-card]")?.addEventListener("click", (event) => {
+    collection.cards = collection.cards.filter((card) => card.id !== event.currentTarget.dataset.deleteCard);
+    saveCollections();
+    closeModal();
+    render();
+  });
+}
+
+function openCardDetail(collectionId, cardId) {
+  const collection = state.collections.find((item) => item.id === collectionId);
+  const card = findCard(collectionId, cardId);
+  if (!collection || !card) return;
+  const body = `
+    <div class="modal-body-pad">
+      <div class="card-detail">
+        <img class="detail-art" src="${safeAttr(card.imageUrl)}" alt="${safeAttr(card.name)}" onerror="this.style.display='none'">
+        <dl class="detail-table">
+          <div><dt>Collection</dt><dd>${escapeHtml(collection.name)}</dd></div>
+          <div><dt>Number</dt><dd>${escapeHtml(card.number || "-")}</dd></div>
+          <div><dt>Type</dt><dd>${escapeHtml(card.supertype || "-")}</dd></div>
+          <div><dt>Rarity</dt><dd>${escapeHtml(card.rarity || "-")}</dd></div>
+          <div><dt>Variants</dt><dd>${card.variants.map((variant) => `${variantLabel(variant)} ${card.owned[variant] ? "owned" : "needed"}`).join(", ")}</dd></div>
+          <div><dt>Notes</dt><dd>${escapeHtml(card.notes || "-")}</dd></div>
+        </dl>
+        <div class="button-row">
+          ${card.variants.map((variant) => `<button class="variant-pill ${card.owned[variant] ? "is-owned" : ""}" data-toggle-variant="${collection.id}:${card.id}:${variant}">${variantLabel(variant)}</button>`).join("")}
+          <button class="secondary-button" data-edit-card="${collection.id}:${card.id}">Edit</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const modal = showModal(card.name, "Card info", body);
+  modal.querySelectorAll("[data-toggle-variant]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [, , variant] = button.dataset.toggleVariant.split(":");
+      card.owned[variant] = !card.owned[variant];
+      saveCollections();
+      closeModal();
+      render();
+      openCardDetail(collectionId, cardId);
+    });
+  });
+  modal.querySelector("[data-edit-card]").addEventListener("click", () => {
+    closeModal();
+    openCardForm(collectionId, cardId);
+  });
+}
+
+function openImportCards(collectionId) {
+  const collection = state.collections.find((item) => item.id === collectionId);
+  if (!collection) return;
+  const body = `
+    <form data-import-cards-form>
+      <div class="field-grid">
+        <label>Cards JSON
+          <textarea name="json" placeholder='[{"name":"Pikachu","number":"025","imageUrl":"https://...","variants":["normal","reverse"]}]'></textarea>
+        </label>
+      </div>
+      <p class="muted">Accepts an array of cards, a Pokemon TCG API card array, or an object with a cards property.</p>
+      <div class="button-row">
+        <button class="primary-button" type="submit">Import cards</button>
+      </div>
+    </form>
+  `;
+  const modal = showModal("Import cards", collection.name, body);
+  modal.querySelector("[data-import-cards-form]").addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      const parsed = JSON.parse(new FormData(event.currentTarget).get("json"));
+      const cards = Array.isArray(parsed) ? parsed : parsed.cards || parsed.data || [];
+      collection.cards.push(...normalizeCards(cards.map(cardFromPossibleApi)));
+      saveCollections();
+      closeModal();
+      render();
+      toast(`Imported ${cards.length} cards`);
+    } catch {
+      toast("That JSON could not be imported");
+    }
+  });
+}
+
+function openImportCollections() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.className = "hidden-input";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        state.collections = normalizeCollections(parsed.collections || parsed);
+        saveCollections();
+        render();
+        toast("Imported collections");
+      } catch {
+        toast("That file could not be imported");
+      }
+    });
+    reader.readAsText(file);
+  });
+  document.body.append(input);
+  input.click();
+  input.remove();
+}
+
+function exportCollections() {
+  const blob = new Blob([JSON.stringify({ collections: state.collections }, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `setdex-export-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function openApiModal() {
+  const body = `
+    <form data-api-form>
+      <div class="field-grid">
+        <label>Pokemon TCG set id
+          <input name="setId" required placeholder="sv1, sv3pt5, swsh9" />
+        </label>
+      </div>
+      <p class="muted">This uses the public PokemonTCG.io API in your browser. No API key is required for light local use.</p>
+      <div class="button-row">
+        <button class="primary-button" type="submit">Import set</button>
+      </div>
+    </form>
+  `;
+  const modal = showModal("Find a set", "Pokemon TCG API", body);
+  modal.querySelector("[data-api-form]").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const setId = new FormData(event.currentTarget).get("setId").trim();
+    if (!setId) return;
+    toast("Fetching set...");
+    try {
+      const [setResponse, cardsResponse] = await Promise.all([
+        fetch(`https://api.pokemontcg.io/v2/sets/${encodeURIComponent(setId)}`),
+        fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&orderBy=number&pageSize=250`),
+      ]);
+      if (!setResponse.ok || !cardsResponse.ok) throw new Error("Fetch failed");
+      const setJson = await setResponse.json();
+      const cardsJson = await cardsResponse.json();
+      const collection = {
+        id: crypto.randomUUID(),
+        type: "set",
+        name: setJson.data.name,
+        code: setJson.data.id,
+        releaseDate: setJson.data.releaseDate || "",
+        imageUrl: setJson.data.images?.logo || setJson.data.images?.symbol || "",
+        goal: "Master set",
+        cards: normalizeCards((cardsJson.data || []).map(cardFromPossibleApi)),
+      };
+      state.collections.unshift(collection);
+      state.activeCollectionId = collection.id;
+      state.route = "detail";
+      saveCollections();
+      closeModal();
+      render();
+      toast(`Imported ${collection.name}`);
+    } catch {
+      toast("Could not fetch that set. Check the id or import JSON instead.");
+    }
+  });
+}
+
+function cardFromPossibleApi(card) {
+  const hasReverse = ["Common", "Uncommon", "Rare", "Rare Holo"].includes(card.rarity);
+  return {
+    id: card.id || crypto.randomUUID(),
+    number: card.number || "",
+    name: card.name || "Unnamed card",
+    supertype: card.supertype || card.types?.join(", ") || "",
+    rarity: card.rarity || "",
+    imageUrl: card.imageUrl || card.images?.large || card.images?.small || "",
+    variants: card.variants || (hasReverse ? ["normal", "reverse"] : ["normal"]),
+    owned: card.owned || {},
+    notes: card.notes || "",
+  };
+}
+
+function showModal(title, kicker, body) {
+  closeModal();
+  const template = document.querySelector("#modal-template").content.cloneNode(true);
+  template.querySelector("[data-modal-title]").textContent = title;
+  template.querySelector("[data-modal-kicker]").textContent = kicker;
+  template.querySelector("[data-modal-body]").innerHTML = body;
+  document.body.append(template);
+  const modal = document.querySelector(".modal-backdrop");
+  modal.addEventListener("click", (event) => {
+    if (event.target.hasAttribute("data-close-modal")) closeModal();
+  });
+  return modal;
+}
+
+function closeModal() {
+  document.querySelector(".modal-backdrop")?.remove();
+}
+
+function getActiveCollection() {
+  return state.collections.find((item) => item.id === state.activeCollectionId);
+}
+
+function findCard(collectionId, cardId) {
+  return state.collections.find((item) => item.id === collectionId)?.cards.find((card) => card.id === cardId);
+}
+
+function titleCase(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function variantLabel(id) {
+  return VARIANTS.find((variant) => variant.id === id)?.label || titleCase(id);
+}
+
+function variantShort(id) {
+  return VARIANTS.find((variant) => variant.id === id)?.short || id.slice(0, 1).toUpperCase();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function safeAttr(value) {
+  return escapeHtml(value || "");
+}
+
+function toast(message) {
+  document.querySelector(".toast")?.remove();
+  const item = document.createElement("div");
+  item.className = "toast";
+  item.textContent = message;
+  document.body.append(item);
+  setTimeout(() => item.remove(), 2600);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeModal();
+});
+
+render();
+loadCollections();

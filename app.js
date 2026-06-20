@@ -787,51 +787,135 @@ function openApiModal() {
   const body = `
     <form data-api-form>
       <div class="field-grid">
-        <label>Pokemon TCG set id
-          <input name="setId" required placeholder="sv1, sv3pt5, swsh9" />
+        <label>Pokemon TCG set name or id
+          <input name="setQuery" required placeholder="151, Paldea Evolved, sv1" />
         </label>
       </div>
-      <p class="muted">This uses the public PokemonTCG.io API in your browser. No API key is required for light local use.</p>
+      <p class="muted">Search by set name or code. If there are multiple matches, choose the one you want.</p>
       <div class="button-row">
-        <button class="primary-button" type="submit">Import set</button>
+        <button class="primary-button" type="submit">Search sets</button>
       </div>
     </form>
   `;
   const modal = showModal("Find a set", "Pokemon TCG API", body);
   modal.querySelector("[data-api-form]").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const setId = new FormData(event.currentTarget).get("setId").trim();
-    if (!setId) return;
-    toast("Fetching set...");
+    const query = new FormData(event.currentTarget).get("setQuery").trim();
+    if (!query) return;
+    toast("Searching sets...");
     try {
-      const [setResponse, cardsResponse] = await Promise.all([
-        fetch(`https://api.pokemontcg.io/v2/sets/${encodeURIComponent(setId)}`),
-        fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&orderBy=number&pageSize=250`),
-      ]);
-      if (!setResponse.ok || !cardsResponse.ok) throw new Error("Fetch failed");
-      const setJson = await setResponse.json();
-      const cardsJson = await cardsResponse.json();
-      const collection = {
-        id: crypto.randomUUID(),
-        type: "set",
-        name: setJson.data.name,
-        code: setJson.data.id,
-        releaseDate: setJson.data.releaseDate || "",
-        imageUrl: setJson.data.images?.logo || setJson.data.images?.symbol || "",
-        goal: "Master set",
-        cards: normalizeCards((cardsJson.data || []).map(cardFromPossibleApi)),
-      };
-      state.collections.unshift(collection);
-      state.activeCollectionId = collection.id;
-      state.route = "detail";
-      saveCollections();
-      closeModal();
-      render();
-      toast(`Imported ${collection.name}`);
+      const matches = await findSetMatches(query);
+      if (!matches.length) {
+        toast("No sets found for that search");
+        return;
+      }
+      if (matches.length === 1) {
+        await importPokemonSet(matches[0].id, matches[0]);
+        return;
+      }
+      showSetSearchResults(modal, matches);
     } catch {
-      toast("Could not fetch that set. Check the id or import JSON instead.");
+      toast("Could not search sets. Check the name or import JSON instead.");
     }
   });
+}
+
+async function findSetMatches(query) {
+  const normalized = query.toLowerCase();
+  const directSet = await fetchPokemonSetById(query);
+  const response = await fetch("https://api.pokemontcg.io/v2/sets?pageSize=250");
+  if (!response.ok) throw new Error("Set search failed");
+  const setsJson = await response.json();
+  const matches = (setsJson.data || []).filter((set) => {
+    const haystack = `${set.id} ${set.name} ${set.series}`.toLowerCase();
+    return haystack.includes(normalized);
+  });
+  if (directSet && !matches.some((set) => set.id === directSet.id)) {
+    matches.unshift(directSet);
+  }
+  return matches
+    .sort((a, b) => setMatchRank(a, normalized) - setMatchRank(b, normalized) || (b.releaseDate || "").localeCompare(a.releaseDate || ""))
+    .slice(0, 12);
+}
+
+async function fetchPokemonSetById(setId) {
+  try {
+    const response = await fetch(`https://api.pokemontcg.io/v2/sets/${encodeURIComponent(setId)}`);
+    if (!response.ok) return null;
+    return (await response.json()).data;
+  } catch {
+    return null;
+  }
+}
+
+function setMatchRank(set, query) {
+  const id = set.id.toLowerCase();
+  const name = set.name.toLowerCase();
+  if (id === query || name === query) return 0;
+  if (name.startsWith(query) || id.startsWith(query)) return 1;
+  return 2;
+}
+
+function showSetSearchResults(modal, matches) {
+  modal.querySelector("[data-modal-title]").textContent = "Choose a set";
+  modal.querySelector("[data-modal-body]").innerHTML = `
+    <div class="modal-body-pad">
+      <div class="collection-list">
+        ${matches
+          .map(
+            (set) => `
+              <button class="collection-row" data-import-set-id="${safeAttr(set.id)}">
+                <img class="thumb" src="${safeAttr(set.images?.logo || set.images?.symbol || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+                <span>
+                  <h3>${escapeHtml(set.name)}</h3>
+                  <p class="muted">${escapeHtml(set.series || "Pokemon TCG")} ${set.releaseDate ? `- ${escapeHtml(set.releaseDate)}` : ""}</p>
+                  <p class="muted">${escapeHtml(set.id)} ${set.total ? `- ${set.total} cards` : ""}</p>
+                </span>
+                <span class="chevron">Import</span>
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+  modal.querySelectorAll("[data-import-set-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const set = matches.find((item) => item.id === button.dataset.importSetId);
+      try {
+        await importPokemonSet(button.dataset.importSetId, set);
+      } catch {
+        toast("Could not import that set. Try another result or import JSON.");
+      }
+    });
+  });
+}
+
+async function importPokemonSet(setId, knownSet = null) {
+  toast("Importing set...");
+  const [setJson, cardsResponse] = await Promise.all([
+    knownSet ? Promise.resolve({ data: knownSet }) : fetch(`https://api.pokemontcg.io/v2/sets/${encodeURIComponent(setId)}`).then((response) => response.json()),
+    fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&orderBy=number&pageSize=250`),
+  ]);
+  if (!cardsResponse.ok || !setJson.data) throw new Error("Set import failed");
+  const cardsJson = await cardsResponse.json();
+  const collection = {
+    id: crypto.randomUUID(),
+    type: "set",
+    name: setJson.data.name,
+    code: setJson.data.id,
+    releaseDate: setJson.data.releaseDate || "",
+    imageUrl: setJson.data.images?.logo || setJson.data.images?.symbol || "",
+    goal: "Master set",
+    cards: normalizeCards((cardsJson.data || []).map(cardFromPossibleApi)),
+  };
+  state.collections.unshift(collection);
+  state.activeCollectionId = collection.id;
+  state.route = "detail";
+  saveCollections();
+  closeModal();
+  render();
+  toast(`Imported ${collection.name}`);
 }
 
 function openArtistApiModal() {

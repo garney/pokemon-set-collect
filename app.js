@@ -361,14 +361,6 @@ function renderCollectionDetail() {
     return renderHome();
   }
   const stats = collectionStats(collection);
-  const filteredCards = collection.cards.filter((card) => {
-    const matchesText = `${card.name} ${card.number} ${card.rarity} ${card.artist}`.toLowerCase().includes(state.search.toLowerCase());
-    const owned = card.variants.some((variant) => card.owned[variant]);
-    const needs = card.variants.some((variant) => !card.owned[variant]);
-    const matchesFilter = state.activeFilter === "all" || (state.activeFilter === "owned" && owned) || (state.activeFilter === "needed" && needs);
-    const matchesVariant = state.activeVariant === "all" || card.variants.includes(state.activeVariant);
-    return matchesText && matchesFilter && matchesVariant;
-  });
 
   return `
     <section class="layout-two">
@@ -406,12 +398,36 @@ function renderCollectionDetail() {
             <input type="search" data-search value="${safeAttr(state.search)}" placeholder="Name, number, rarity, artist" />
           </label>
         </div>
-        <div class="grid">
-          ${filteredCards.map((card) => renderCardTile(collection, card)).join("") || renderEmpty("No cards match", "Try another filter or add cards to this collection.")}
+        <div class="grid" data-card-grid>
+          ${renderFilteredCardGrid(collection)}
         </div>
       </section>
     </section>
   `;
+}
+
+function getFilteredCards(collection) {
+  return collection.cards.filter((card) => {
+    const matchesText = `${card.name} ${card.number} ${card.rarity} ${card.artist}`.toLowerCase().includes(state.search.toLowerCase());
+    const owned = card.variants.some((variant) => card.owned[variant]);
+    const needs = card.variants.some((variant) => !card.owned[variant]);
+    const matchesFilter = state.activeFilter === "all" || (state.activeFilter === "owned" && owned) || (state.activeFilter === "needed" && needs);
+    const matchesVariant = state.activeVariant === "all" || card.variants.includes(state.activeVariant);
+    return matchesText && matchesFilter && matchesVariant;
+  });
+}
+
+function renderFilteredCardGrid(collection) {
+  const filteredCards = getFilteredCards(collection);
+  return filteredCards.map((card) => renderCardTile(collection, card)).join("") || renderEmpty("No cards match", "Try another filter or add cards to this collection.");
+}
+
+function updateCardGrid() {
+  const collection = getActiveCollection();
+  const grid = document.querySelector("[data-card-grid]");
+  if (!collection || !grid) return;
+  grid.innerHTML = renderFilteredCardGrid(collection);
+  bindCardGridEvents(grid);
 }
 
 function renderCardTile(collection, card) {
@@ -479,27 +495,17 @@ function bindEvents() {
   document.querySelectorAll("[data-search]").forEach((input) => {
     input.addEventListener("input", () => {
       state.search = input.value;
-      render();
+      updateCardGrid();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        updateCardGrid();
+      }
     });
   });
 
-  document.querySelectorAll("[data-toggle-variant]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const [collectionId, cardId, variant] = button.dataset.toggleVariant.split(":");
-      const card = findCard(collectionId, cardId);
-      if (!card) return;
-      card.owned[variant] = !card.owned[variant];
-      saveCollections();
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-open-card]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const [collectionId, cardId] = button.dataset.openCard.split(":");
-      openCardDetail(collectionId, cardId);
-    });
-  });
+  bindCardGridEvents(document);
 
   document.querySelectorAll("[data-open-card-form]").forEach((button) => {
     button.addEventListener("click", () => openCardForm(button.dataset.openCardForm));
@@ -527,6 +533,26 @@ function bindEvents() {
 
   document.querySelectorAll("[data-open-artist-api]").forEach((button) => {
     button.addEventListener("click", openArtistApiModal);
+  });
+}
+
+function bindCardGridEvents(root = document) {
+  root.querySelectorAll("[data-toggle-variant]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [collectionId, cardId, variant] = button.dataset.toggleVariant.split(":");
+      const card = findCard(collectionId, cardId);
+      if (!card) return;
+      card.owned[variant] = !card.owned[variant];
+      saveCollections();
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-open-card]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [collectionId, cardId] = button.dataset.openCard.split(":");
+      openCardDetail(collectionId, cardId);
+    });
   });
 }
 

@@ -1,13 +1,23 @@
 const http = require("node:http");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+
+loadEnvFile();
 
 const PORT = Number(process.env.PORT || 4174);
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
 const DATA_FILE = path.join(DATA_DIR, "collections.json");
 const EBAY_AU_ORIGIN = "https://www.ebay.com.au";
+const EBAY_ENV = process.env.EBAY_ENV === "sandbox" ? "sandbox" : "production";
+const EBAY_MARKETPLACE_ID = process.env.EBAY_MARKETPLACE_ID || "EBAY_AU";
+const EBAY_SCOPE = process.env.EBAY_SCOPE || "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights";
+const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+const EBAY_TOKEN_URL = `${EBAY_API_BASE}/identity/v1/oauth2/token`;
+const EBAY_SOLD_SEARCH_URL = `${EBAY_API_BASE}/buy/marketplace_insights/v1_beta/item_sales/search`;
+let ebayTokenCache = null;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -202,7 +212,14 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/health" && request.method === "GET") {
-      sendJson(response, 200, { ok: true });
+      sendJson(response, 200, {
+        ok: true,
+        ebay: {
+          env: EBAY_ENV,
+          marketplaceId: EBAY_MARKETPLACE_ID,
+          configured: hasEbayApiCredentials(),
+        },
+      });
       return;
     }
 
@@ -241,7 +258,56 @@ ensureDataFile().then(() => {
 });
 
 async function fetchEbaySoldPrices(query) {
-  const searchUrl = ebaySoldSearchUrl(query);
+  const sourceUrl = ebaySoldSearchUrl(query);
+  if (hasEbayApiCredentials()) {
+    try {
+      return await fetchEbayApiSoldPrices(query, sourceUrl);
+    } catch (error) {
+      const fallback = await fetchEbayScrapedSoldPrices(query, sourceUrl).catch(() => null);
+      if (fallback?.sales?.length) return fallback;
+      throw error;
+    }
+  }
+
+  return fetchEbayScrapedSoldPrices(query, sourceUrl);
+}
+
+async function fetchEbayApiSoldPrices(query, sourceUrl) {
+  const token = await getEbayApplicationToken();
+  const searchUrl = new URL(EBAY_SOLD_SEARCH_URL);
+  searchUrl.searchParams.set("q", query);
+  searchUrl.searchParams.set("limit", "20");
+
+  const response = await fetch(searchUrl, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "x-ebay-c-marketplace-id": EBAY_MARKETPLACE_ID,
+      "accept-language": "en-AU",
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.errors?.[0]?.message || `eBay API returned ${response.status}`);
+  }
+
+  const sales = normalizeEbayApiSales(payload).slice(0, 8);
+  const prices = sales.map((sale) => sale.price).filter((price) => Number.isFinite(price));
+  const averagePrice = prices.length ? roundMoney(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null;
+  const currency = sales.find((sale) => sale.currency)?.currency || "AUD";
+  return {
+    query,
+    source: "ebay-api",
+    sourceUrl,
+    fetchedAt: new Date().toISOString(),
+    currency,
+    lastPrice: prices[0] ?? null,
+    averagePrice,
+    sales,
+  };
+}
+
+async function fetchEbayScrapedSoldPrices(query, sourceUrl) {
+  const searchUrl = sourceUrl;
 
   const response = await fetch(searchUrl, {
     headers: {
@@ -259,6 +325,7 @@ async function fetchEbaySoldPrices(query) {
   const averagePrice = prices.length ? roundMoney(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null;
   return {
     query,
+    source: "ebay-sold-search",
     sourceUrl: searchUrl.toString(),
     fetchedAt: new Date().toISOString(),
     currency: "AUD",
@@ -266,6 +333,56 @@ async function fetchEbaySoldPrices(query) {
     averagePrice,
     sales,
   };
+}
+
+async function getEbayApplicationToken() {
+  if (ebayTokenCache && ebayTokenCache.expiresAt > Date.now() + 60_000) {
+    return ebayTokenCache.accessToken;
+  }
+  const credentials = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString("base64");
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: EBAY_SCOPE,
+  });
+  const response = await fetch(EBAY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${credentials}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.error || `eBay token returned ${response.status}`);
+  }
+  ebayTokenCache = {
+    accessToken: payload.access_token,
+    expiresAt: Date.now() + Math.max((payload.expires_in || 0) - 60, 60) * 1000,
+  };
+  return ebayTokenCache.accessToken;
+}
+
+function hasEbayApiCredentials() {
+  return Boolean(process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET);
+}
+
+function normalizeEbayApiSales(payload) {
+  const items = payload.itemSales || payload.itemSummaries || payload.items || [];
+  return items
+    .map((item) => {
+      const price = Number(item.price?.value || item.itemPrice?.value || item.currentBidPrice?.value);
+      if (!Number.isFinite(price)) return null;
+      return {
+        title: item.title || "Sold listing",
+        price,
+        currency: item.price?.currency || item.itemPrice?.currency || item.currentBidPrice?.currency || "AUD",
+        displayPrice: formatAud(price),
+        soldDate: item.itemSoldDate || item.lastSoldDate || item.dateSold || "",
+        url: cleanEbayUrl(item.itemWebUrl || item.itemAffiliateWebUrl || item.legacyItemWebUrl || ""),
+      };
+    })
+    .filter(Boolean);
 }
 
 function ebaySoldSearchUrl(query) {
@@ -338,4 +455,24 @@ function roundMoney(value) {
 
 function formatAud(value) {
   return `AU $${value.toFixed(2)}`;
+}
+
+function loadEnvFile() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fsSync.existsSync(envPath)) return;
+  const lines = fsSync.readFileSync(envPath, "utf8").split(/\r?\n/);
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const separator = trimmed.indexOf("=");
+    if (separator === -1) return;
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  });
 }

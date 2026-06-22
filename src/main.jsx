@@ -150,6 +150,31 @@ function App() {
     setModal(null);
   }
 
+  function addCardsFromSearch(collectionId, results) {
+    const cardsToAdd = normalizeCards(results.map(cardFromPossibleApi)).map((card) => {
+      const owned = {};
+      card.variants.forEach((variant) => {
+        owned[variant] = false;
+      });
+      return { ...card, owned };
+    });
+    let addedCount = 0;
+    const nextCollections = collections.map((collection) => {
+      if (collection.id !== collectionId) return collection;
+      const existingIds = new Set(collection.cards.map((card) => card.id));
+      const newCards = cardsToAdd.filter((card) => {
+        if (existingIds.has(card.id)) return false;
+        existingIds.add(card.id);
+        return true;
+      });
+      addedCount = newCards.length;
+      return { ...collection, cards: [...collection.cards, ...newCards] };
+    });
+    persist(nextCollections);
+    setModal(null);
+    showToast(addedCount ? `Added ${addedCount} cards` : "Those cards are already in this collection");
+  }
+
   function deleteCard(collectionId, cardId) {
     persist(
       collections.map((collection) =>
@@ -406,6 +431,7 @@ function App() {
             onSaveCollection={saveCollection}
             onDeleteCollection={deleteCollection}
             onSaveCard={saveCard}
+            onAddCardsFromSearch={addCardsFromSearch}
             onDeleteCard={deleteCard}
             onToggleVariant={toggleVariant}
             onEditCard={(collectionId, cardId) => setModal({ type: "card-form", collectionId, cardId })}
@@ -791,7 +817,7 @@ function ModalContent(props) {
     );
   }
   if (modal.type === "card-form" && collection) {
-    return <CardForm collection={collection} card={card} onSave={props.onSaveCard} onDelete={props.onDeleteCard} />;
+    return <CardForm collection={collection} card={card} onSave={props.onSaveCard} onAddCards={props.onAddCardsFromSearch} onDelete={props.onDeleteCard} />;
   }
   if (modal.type === "card" && collection && card) {
     return (
@@ -838,7 +864,7 @@ function CollectionForm({ collection, preferredType = "", onSave, onDelete }) {
   );
 }
 
-function CardForm({ collection, card, onSave, onDelete }) {
+function CardForm({ collection, card, onSave, onAddCards, onDelete }) {
   const [draft, setDraft] = useState(() => ({
     name: card?.name || "",
     number: card?.number || "",
@@ -853,6 +879,7 @@ function CardForm({ collection, card, onSave, onDelete }) {
   const [checkedVariants, setCheckedVariants] = useState(() => new Set(card?.variants || ["normal"]));
   const [cardSearch, setCardSearch] = useState("");
   const [cardResults, setCardResults] = useState([]);
+  const [selectedResultIds, setSelectedResultIds] = useState(() => new Set());
   const [isSearching, setIsSearching] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
 
@@ -892,12 +919,32 @@ function CardForm({ collection, card, onSave, onDelete }) {
     try {
       const results = await searchPokemonCards(query, collection);
       setCardResults(results);
+      setSelectedResultIds(new Set());
       setSearchMessage(results.length ? "" : "No cards found. Try a broader name or card number.");
     } catch {
       setSearchMessage("Could not search PokemonTCG.io right now.");
     } finally {
       setIsSearching(false);
     }
+  }
+
+  function toggleResultSelection(resultId) {
+    setSelectedResultIds((current) => {
+      const next = new Set(current);
+      if (next.has(resultId)) next.delete(resultId);
+      else next.add(resultId);
+      return next;
+    });
+  }
+
+  function selectAllResults() {
+    setSelectedResultIds(new Set(cardResults.map((result) => result.id)));
+  }
+
+  function addSelectedResults() {
+    const selectedResults = cardResults.filter((result) => selectedResultIds.has(result.id));
+    if (!selectedResults.length) return;
+    onAddCards(collection.id, selectedResults);
   }
 
   return (
@@ -925,20 +972,42 @@ function CardForm({ collection, card, onSave, onDelete }) {
           {collection.type === "set" && collection.code ? <p className="muted">Search is scoped to set code {collection.code}.</p> : null}
           {searchMessage ? <p className="muted">{searchMessage}</p> : null}
           {cardResults.length ? (
-            <div className="lookup-results">
-              {cardResults.map((result) => (
-                <button key={result.id} className="lookup-result" type="button" onClick={() => useCardResult(result)}>
-                  <img src={result.images?.small || result.images?.large || ""} alt="" loading="lazy" onError={(event) => (event.currentTarget.style.visibility = "hidden")} />
-                  <span>
-                    <strong>{result.name}</strong>
-                    <small>
-                      #{result.number || "-"} {result.set?.name ? `- ${result.set.name}` : ""} {result.rarity ? `- ${result.rarity}` : ""}
-                    </small>
-                    <small>{result.artist || result.illustrator || ""}</small>
-                  </span>
+            <>
+              <div className="lookup-actions">
+                <button className="secondary-button" type="button" onClick={selectAllResults}>
+                  Select all
                 </button>
-              ))}
-            </div>
+                <button className="secondary-button" type="button" onClick={() => setSelectedResultIds(new Set())}>
+                  Clear
+                </button>
+                <button className="primary-button" type="button" onClick={addSelectedResults} disabled={!selectedResultIds.size}>
+                  Add selected ({selectedResultIds.size})
+                </button>
+              </div>
+              <div className="lookup-results">
+                {cardResults.map((result) => {
+                  const isSelected = selectedResultIds.has(result.id);
+                  return (
+                    <div key={result.id} className={`lookup-result ${isSelected ? "is-selected" : ""}`}>
+                      <label className="lookup-check">
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleResultSelection(result.id)} />
+                      </label>
+                      <img src={result.images?.small || result.images?.large || ""} alt="" loading="lazy" onError={(event) => (event.currentTarget.style.visibility = "hidden")} />
+                      <span>
+                        <strong>{result.name}</strong>
+                        <small>
+                          #{result.number || "-"} {result.set?.name ? `- ${result.set.name}` : ""} {result.rarity ? `- ${result.rarity}` : ""}
+                        </small>
+                        <small>{result.artist || result.illustrator || ""}</small>
+                      </span>
+                      <button className="plain-button" type="button" onClick={() => useCardResult(result)}>
+                        Fill
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           ) : null}
         </section>
       ) : null}

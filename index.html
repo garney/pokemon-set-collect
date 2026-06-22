@@ -4,26 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SetDex Pokemon Collection Tracker</title>
-    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="app" class="app-shell"></div>
-
-    <template id="modal-template">
-      <div class="modal-backdrop" data-close-modal>
-        <section class="modal" role="dialog" aria-modal="true">
-          <header class="modal__header">
-            <div>
-              <p class="eyebrow" data-modal-kicker></p>
-              <h2 data-modal-title></h2>
-            </div>
-            <button class="icon-button" type="button" data-close-modal aria-label="Close">x</button>
-          </header>
-          <div data-modal-body></div>
-        </section>
-      </div>
-    </template>
-
-    <script src="app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

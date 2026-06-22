@@ -4,9 +4,17 @@
   "private": true,
   "description": "A local-first Pokemon card collection tracker.",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "check": "node --check server.js && node --check app.js"
+    "build": "vite build",
+    "start": "npm run build && node server.js",
+    "server": "node server.js",
+    "dev": "vite --host 127.0.0.1",
+    "check": "node --check server.js && vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "engines": {
     "node": ">=20"

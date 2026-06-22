@@ -8,6 +8,7 @@ loadEnvFile();
 
 const PORT = Number(process.env.PORT || 4174);
 const ROOT = __dirname;
+const DIST_DIR = path.join(ROOT, "dist");
 const DATA_DIR = path.join(ROOT, "data");
 const DATA_FILE = path.join(DATA_DIR, "collections.json");
 const EBAY_AU_ORIGIN = "https://www.ebay.com.au";
@@ -173,8 +174,9 @@ function sendJson(response, status, payload) {
 
 function safeStaticPath(urlPath) {
   const requested = urlPath === "/" ? "/index.html" : decodeURIComponent(urlPath);
-  const filePath = path.normalize(path.join(ROOT, requested));
-  if (!filePath.startsWith(ROOT)) return null;
+  const staticRoot = fsSync.existsSync(DIST_DIR) ? DIST_DIR : ROOT;
+  const filePath = path.normalize(path.join(staticRoot, requested));
+  if (!filePath.startsWith(staticRoot)) return null;
   return filePath;
 }
 

@@ -2,3 +2,62 @@
   width: 100%;
   text-align: left;
 }
+
+.lookup-panel {
+  margin: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.lookup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.lookup-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.lookup-result {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+}
+
+.lookup-result img {
+  width: 54px;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.lookup-result strong,
+.lookup-result small {
+  display: block;
+}
+
+.lookup-result strong {
+  font-size: 0.9rem;
+}
+
+.lookup-result small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}

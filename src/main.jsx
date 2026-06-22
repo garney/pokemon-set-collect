@@ -839,25 +839,132 @@ function CollectionForm({ collection, preferredType = "", onSave, onDelete }) {
 }
 
 function CardForm({ collection, card, onSave, onDelete }) {
-  const checkedVariants = new Set(card?.variants || ["normal"]);
+  const [draft, setDraft] = useState(() => ({
+    name: card?.name || "",
+    number: card?.number || "",
+    supertype: card?.supertype || "",
+    rarity: card?.rarity || "",
+    artist: card?.artist || "",
+    imageUrl: card?.imageUrl || "",
+    lastSoldPrice: card?.market?.ebayAu?.lastPrice || "",
+    lastSoldUrl: card?.market?.ebayAu?.sourceUrl || "",
+    notes: card?.notes || "",
+  }));
+  const [checkedVariants, setCheckedVariants] = useState(() => new Set(card?.variants || ["normal"]));
+  const [cardSearch, setCardSearch] = useState("");
+  const [cardResults, setCardResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("");
+
+  function updateDraft(field, value) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleDraftVariant(variantId) {
+    setCheckedVariants((current) => {
+      const next = new Set(current);
+      if (next.has(variantId)) next.delete(variantId);
+      else next.add(variantId);
+      return next;
+    });
+  }
+
+  function useCardResult(result) {
+    const nextCard = normalizeCards([cardFromPossibleApi(result)])[0];
+    setDraft((current) => ({
+      ...current,
+      name: nextCard.name,
+      number: nextCard.number,
+      supertype: nextCard.supertype,
+      rarity: nextCard.rarity,
+      artist: nextCard.artist,
+      imageUrl: nextCard.imageUrl,
+    }));
+    setCheckedVariants(new Set(nextCard.variants));
+  }
+
+  async function submitSearch(event) {
+    event.preventDefault();
+    const query = cardSearch.trim();
+    if (!query) return;
+    setIsSearching(true);
+    setSearchMessage("");
+    try {
+      const results = await searchPokemonCards(query, collection);
+      setCardResults(results);
+      setSearchMessage(results.length ? "" : "No cards found. Try a broader name or card number.");
+    } catch {
+      setSearchMessage("Could not search PokemonTCG.io right now.");
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
   return (
     <form onSubmit={(event) => { event.preventDefault(); onSave(collection.id, event.currentTarget, card?.id); }}>
+      {!card ? (
+        <section className="lookup-panel">
+          <div className="field-grid">
+            <label>
+              Search PokemonTCG.io
+              <span className="lookup-row">
+                <input
+                  value={cardSearch}
+                  onChange={(event) => setCardSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") submitSearch(event);
+                  }}
+                  placeholder={collection.type === "set" ? "Name or number in this set" : "Name or card number"}
+                />
+                <button className="secondary-button" type="button" onClick={submitSearch} disabled={isSearching}>
+                  {isSearching ? "Searching" : "Search"}
+                </button>
+              </span>
+            </label>
+          </div>
+          {collection.type === "set" && collection.code ? <p className="muted">Search is scoped to set code {collection.code}.</p> : null}
+          {searchMessage ? <p className="muted">{searchMessage}</p> : null}
+          {cardResults.length ? (
+            <div className="lookup-results">
+              {cardResults.map((result) => (
+                <button key={result.id} className="lookup-result" type="button" onClick={() => useCardResult(result)}>
+                  <img src={result.images?.small || result.images?.large || ""} alt="" loading="lazy" onError={(event) => (event.currentTarget.style.visibility = "hidden")} />
+                  <span>
+                    <strong>{result.name}</strong>
+                    <small>
+                      #{result.number || "-"} {result.set?.name ? `- ${result.set.name}` : ""} {result.rarity ? `- ${result.rarity}` : ""}
+                    </small>
+                    <small>{result.artist || result.illustrator || ""}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <div className="field-grid">
-        <label>Name<input name="name" required defaultValue={card?.name || ""} placeholder="Pikachu" /></label>
-        <label>Number<input name="number" defaultValue={card?.number || ""} placeholder="025" /></label>
-        <label>Type<input name="supertype" defaultValue={card?.supertype || ""} placeholder="Lightning" /></label>
-        <label>Rarity<input name="rarity" defaultValue={card?.rarity || ""} placeholder="Rare Holo" /></label>
-        <label>Artist / illustrator<input name="artist" defaultValue={card?.artist || ""} placeholder="Mitsuhiro Arita" /></label>
-        <label>Card image URL<input name="imageUrl" defaultValue={card?.imageUrl || ""} placeholder="https://..." /></label>
-        <label>Manual eBay AU last sold price<input name="lastSoldPrice" inputMode="decimal" defaultValue={card?.market?.ebayAu?.lastPrice || ""} placeholder="42.50" /></label>
-        <label>Last sold source URL<input name="lastSoldUrl" defaultValue={card?.market?.ebayAu?.sourceUrl || ""} placeholder="https://www.ebay.com.au/..." /></label>
-        <label>Notes<textarea name="notes" defaultValue={card?.notes || ""} /></label>
+        <label>Name<input name="name" required value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="Pikachu" /></label>
+        <label>Number<input name="number" value={draft.number} onChange={(event) => updateDraft("number", event.target.value)} placeholder="025" /></label>
+        <label>Type<input name="supertype" value={draft.supertype} onChange={(event) => updateDraft("supertype", event.target.value)} placeholder="Lightning" /></label>
+        <label>Rarity<input name="rarity" value={draft.rarity} onChange={(event) => updateDraft("rarity", event.target.value)} placeholder="Rare Holo" /></label>
+        <label>Artist / illustrator<input name="artist" value={draft.artist} onChange={(event) => updateDraft("artist", event.target.value)} placeholder="Mitsuhiro Arita" /></label>
+        <label>Card image URL<input name="imageUrl" value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://..." /></label>
+        <label>Manual eBay AU last sold price<input name="lastSoldPrice" inputMode="decimal" value={draft.lastSoldPrice} onChange={(event) => updateDraft("lastSoldPrice", event.target.value)} placeholder="42.50" /></label>
+        <label>Last sold source URL<input name="lastSoldUrl" value={draft.lastSoldUrl} onChange={(event) => updateDraft("lastSoldUrl", event.target.value)} placeholder="https://www.ebay.com.au/..." /></label>
+        <label>Notes<textarea name="notes" value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
       </div>
       <h3>Variants to collect</h3>
       <div className="filters">
         {VARIANTS.map((variant) => (
           <label key={variant.id} className="chip">
-            <input type="checkbox" name="variants" value={variant.id} defaultChecked={checkedVariants.has(variant.id)} /> {variant.label}
+            <input
+              type="checkbox"
+              name="variants"
+              value={variant.id}
+              checked={checkedVariants.has(variant.id)}
+              onChange={() => toggleDraftVariant(variant.id)}
+            />{" "}
+            {variant.label}
           </label>
         ))}
       </div>
@@ -1075,6 +1182,49 @@ async function findSetMatches(query) {
   const matches = (setsJson.data || []).filter((set) => `${set.id} ${set.name} ${set.series}`.toLowerCase().includes(normalized));
   if (directSet && !matches.some((set) => set.id === directSet.id)) matches.unshift(directSet);
   return matches.sort((a, b) => setMatchRank(a, normalized) - setMatchRank(b, normalized) || (b.releaseDate || "").localeCompare(a.releaseDate || "")).slice(0, 12);
+}
+
+async function searchPokemonCards(query, collection) {
+  const searches = pokemonCardSearchQueries(query, collection);
+  const found = [];
+  const seen = new Set();
+  for (const cardQuery of searches) {
+    const response = await fetch(
+      `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(cardQuery)}&orderBy=set.releaseDate,number&pageSize=20`,
+    );
+    if (!response.ok) continue;
+    const payload = await response.json();
+    (payload.data || []).forEach((card) => {
+      if (seen.has(card.id)) return;
+      seen.add(card.id);
+      found.push(card);
+    });
+    if (found.length >= 12) break;
+  }
+  return found.slice(0, 12);
+}
+
+function pokemonCardSearchQueries(query, collection) {
+  const term = query.trim();
+  const setPrefix = collection.type === "set" && collection.code ? `set.id:${collection.code} ` : "";
+  const safeTerm = escapePokemonQueryTerm(term);
+  const unpaddedNumber = /^\d+$/.test(safeTerm) ? String(Number(safeTerm)) : "";
+  const firstWord = escapePokemonQueryTerm(term.split(/\s+/)[0] || term);
+  const looksLikeNumber = /^[a-z0-9-]+$/i.test(term);
+  return [
+    looksLikeNumber ? `${setPrefix}number:${safeTerm}` : null,
+    unpaddedNumber && unpaddedNumber !== safeTerm ? `${setPrefix}number:${unpaddedNumber}` : null,
+    `${setPrefix}name:"${term.replaceAll('"', '\\"')}"`,
+    `${setPrefix}name:${firstWord}*`,
+    collection.type === "set" ? null : looksLikeNumber ? `number:${safeTerm}` : null,
+    collection.type === "set" || !unpaddedNumber || unpaddedNumber === safeTerm ? null : `number:${unpaddedNumber}`,
+    collection.type === "set" ? null : `name:"${term.replaceAll('"', '\\"')}"`,
+    collection.type === "set" ? null : `name:${firstWord}*`,
+  ].filter(Boolean);
+}
+
+function escapePokemonQueryTerm(value) {
+  return value.replace(/[^a-z0-9-]/gi, "");
 }
 
 async function fetchPokemonSetById(setId) {
